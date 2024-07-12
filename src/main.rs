@@ -11,28 +11,36 @@ use inquire::{
 };
 
 #[derive(Debug)]
+struct Allocation {
+    amount: Decimal,
+    pct_target: Option<Decimal>,
+}
+
+#[derive(Debug)]
 struct Portfolio {
-    allocations: HashMap<String, Decimal>,
-    targets: HashMap<String, Option<Decimal>>,
+    allocations: HashMap<String, Allocation>,
 }
 
 impl Portfolio {
     fn new() -> Portfolio {
         Portfolio {
             allocations: HashMap::new(),
-            targets: HashMap::new(),
         }
     }
 
     fn total(&self) -> Decimal {
-        self.allocations.values().sum()
+        self.allocations.values().map(|v| v.amount).sum()
     }
 
     fn add_asset_class(&mut self, name: String) {
         // Add a new asset class, defaulting to an allocation of zero
-        // TODO: Should this just be one HashMap...
-        self.allocations.insert(name.clone(), dec!(0.00));
-        self.targets.insert(name, None);
+        self.allocations.insert(
+            name.clone(),
+            Allocation {
+                amount: dec!(0.00),
+                pct_target: None,
+            },
+        );
     }
 
     fn asset_classes(&self) -> Vec<&str> {
@@ -40,9 +48,11 @@ impl Portfolio {
     }
 
     fn get_allocation(&self, name: &str) -> &Decimal {
-        self.allocations
+        &self
+            .allocations
             .get(name)
             .expect("Unable to retrieve allocation")
+            .amount
     }
 
     fn set_allocation(&mut self, name: String, amount: Decimal) {
@@ -50,15 +60,16 @@ impl Portfolio {
         // entry API. On the other hand, it probably doesn't hurt?
         self.allocations
             .entry(name)
-            .and_modify(|e| *e = amount)
-            .or_insert(amount);
+            .and_modify(|e| e.amount = amount);
     }
 
     fn summary_table(&self) -> String {
         let mut result = String::from("Asset Class\tAllocation\tTarget");
         for (asset_class, allocation) in &self.allocations {
-            let target = self.targets.get(asset_class);
-            let row = format!("\n{}\t{}\t{:?}", asset_class, allocation, target);
+            let row = format!(
+                "\n{}\t{}\t{:?}",
+                asset_class, allocation.amount, allocation.pct_target
+            );
             result.push_str(row.as_str());
         }
 
