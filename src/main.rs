@@ -1,16 +1,19 @@
 use std::collections::HashMap;
 use std::io;
 
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
 #[derive(Debug)]
 struct Portfolio {
     // TODO: Probably better not to use floats for money...
-    total: f64,
-    allocations: HashMap<String, f64>,
+    total: Decimal,
+    allocations: HashMap<String, Decimal>,
 }
 
 fn main() {
     let mut current_portfolio = Portfolio {
-        total: 0.0,
+        total: dec!(0.00),
         allocations: HashMap::new(),
     };
 
@@ -47,11 +50,14 @@ fn input_portfolio(portfolio: &mut Portfolio) {
             .read_line(&mut amount)
             .expect("Failed to read line");
         let amount: f64 = amount.trim().parse().expect("Please enter a number");
+        let amount_dec = Decimal::from_f64_retain(amount)
+            .expect("Failed to convert to Decimal")
+            .round_dp(2);
 
         portfolio
             .allocations
-            .insert(asset_class.to_string(), amount);
-        portfolio.total += amount;
+            .insert(asset_class.to_string(), amount_dec);
+        portfolio.total += amount_dec;
     }
 }
 
@@ -83,13 +89,18 @@ fn calculate_adjustments(current: &Portfolio, ideal: &HashMap<String, f64>) {
     println!("\nAdjustments needed:");
 
     for (asset_class, ideal_percentage) in ideal {
-        let ideal_amount = current.total * ideal_percentage;
-        let current_amount = current.allocations.get(asset_class).unwrap_or(&0.0);
+        let ideal_amount = current.total
+            * Decimal::from_f64_retain(*ideal_percentage).expect("Failed to convert to decimal");
+        let default_amount = &dec!(0.0);
+        let current_amount = current
+            .allocations
+            .get(asset_class)
+            .unwrap_or(default_amount);
         let adjustment = ideal_amount - current_amount;
 
-        if adjustment.abs() > 0.01 {
+        if adjustment.abs() > dec!(0.01) {
             // Avoid displaying very small adjustments
-            if adjustment > 0.0 {
+            if adjustment > dec!(0.0) {
                 println!("Buy ${:.2} of {}", adjustment, asset_class);
             } else {
                 println!("Sell ${:.2} of {}", -adjustment, asset_class);
