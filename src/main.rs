@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 use rust_decimal::Decimal;
@@ -88,13 +88,19 @@ fn input_ideal_allocations(ideal_allocations: &mut HashMap<String, f64>) {
 fn calculate_adjustments(current: &Portfolio, ideal: &HashMap<String, f64>) {
     println!("\nAdjustments needed:");
 
-    for (asset_class, ideal_percentage) in ideal {
+    // Combine all asset classes from both current and ideal allocations
+    let mut all_assets: HashSet<String> = current.allocations.keys().cloned().collect();
+    all_assets.extend(ideal.keys().cloned());
+
+    for asset_class in all_assets {
+        let ideal_percentage = ideal.get(&asset_class).unwrap_or(&0.0);
+        // TODO: Should we convert this earlier when we parse?
         let ideal_amount = current.total
             * Decimal::from_f64_retain(*ideal_percentage).expect("Failed to convert to decimal");
         let default_amount = &dec!(0.0);
         let current_amount = current
             .allocations
-            .get(asset_class)
+            .get(&asset_class)
             .unwrap_or(default_amount);
         let adjustment = ideal_amount - current_amount;
 
