@@ -55,12 +55,26 @@ impl Portfolio {
             .amount
     }
 
+    fn get_target(&self, name: &str) -> &Option<Decimal> {
+        &self
+            .allocations
+            .get(name)
+            .expect("Unable to retrieve allocation")
+            .pct_target
+    }
+
     fn set_allocation(&mut self, name: String, amount: Decimal) {
         // NOTE: I think we always know that the key is here so maybe we don't need to use the
         // entry API. On the other hand, it probably doesn't hurt?
         self.allocations
             .entry(name)
             .and_modify(|e| e.amount = amount);
+    }
+
+    fn set_target(&mut self, name: String, target: Decimal) {
+        self.allocations
+            .entry(name)
+            .and_modify(|e| e.pct_target = Some(target));
     }
 
     fn summary_table(&self) -> String {
@@ -127,6 +141,37 @@ fn main() -> InquireResult<()> {
                         match new_allocation {
                             Ok(new_allocation) => portfolio.set_allocation(asset_class.to_string(), Decimal::from_str(new_allocation.as_str()).unwrap()),
                             Err(_) => println!("An error happened when trying to set the allocation, please try again")
+                        }
+                    }
+                    Err(_) => println!("There was an error, please try again"),
+                }
+            }
+            Ok("Set Target") => {
+                let asset_class =
+                    Select::new("Choose Asset Class:", portfolio.asset_classes()).prompt();
+
+                match asset_class {
+                    Ok(asset_class) => {
+                        let current_target = match portfolio.get_target(&asset_class) {
+                            Some(target) => format!("{}", target),
+                            None => String::from("Unspecified"),
+                        };
+
+                        let prompt = format!(
+                            "New Target for {} (Current: {}):",
+                            asset_class, current_target
+                        );
+
+                        let new_target = Text::new(&prompt).prompt();
+
+                        match new_target {
+                            Ok(new_target) => portfolio.set_target(
+                                asset_class.to_string(),
+                                Decimal::from_str(new_target.as_str()).unwrap(),
+                            ),
+                            Err(_) => println!(
+                                "An error happened when trying to set the target, please try again"
+                            ),
                         }
                     }
                     Err(_) => println!("There was an error, please try again"),
