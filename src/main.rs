@@ -1,116 +1,213 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 
+use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+use inquire::{
+    error::{InquireError, InquireResult},
+    Select, Text,
+};
+
+#[derive(Debug)]
+struct Allocation {
+    amount: Decimal,
+    pct_target: Option<Decimal>,
+}
+
 #[derive(Debug)]
 struct Portfolio {
-    // TODO: Probably better not to use floats for money...
-    total: Decimal,
-    allocations: HashMap<String, Decimal>,
+    allocations: HashMap<String, Allocation>,
 }
 
-fn main() {
-    let mut current_portfolio = Portfolio {
-        total: dec!(0.00),
-        allocations: HashMap::new(),
-    };
+impl Portfolio {
+    fn new() -> Portfolio {
+        Portfolio {
+            allocations: HashMap::new(),
+        }
+    }
 
-    let mut ideal_allocations = HashMap::new();
+    fn num_allocations(&self) -> usize {
+        self.allocations.len()
+    }
 
-    // Input current Portfolio
-    println!("Enter your current portfolio: ");
-    input_portfolio(&mut current_portfolio);
+    fn total(&self) -> Decimal {
+        self.allocations.values().map(|v| v.amount).sum()
+    }
 
-    // Input ideal allocations
-    println!("Enter your ideal allocations (in percentages):");
-    input_ideal_allocations(&mut ideal_allocations);
+    fn add_asset_class(&mut self, name: String) {
+        // Add a new asset class, defaulting to an allocation of zero
+        self.allocations.insert(
+            name.clone(),
+            Allocation {
+                amount: dec!(0.00),
+                pct_target: None,
+            },
+        );
+    }
 
-    // Calculate and display adjustments
-    calculate_adjustments(&current_portfolio, &ideal_allocations);
-}
+    fn asset_classes(&self) -> Vec<&str> {
+        self.allocations.keys().map(AsRef::as_ref).collect()
+    }
 
-fn input_portfolio(portfolio: &mut Portfolio) {
-    loop {
-        println!("Enter asset class (or 'done' to finish):");
-        let mut asset_class = String::new();
-        io::stdin()
-            .read_line(&mut asset_class)
-            .expect("Failed to read line");
-        let asset_class = asset_class.trim();
+    fn get_allocation(&self, name: &str) -> &Decimal {
+        &self
+            .allocations
+            .get(name)
+            .expect("Unable to retrieve allocation")
+            .amount
+    }
 
-        if asset_class == "done" {
-            break;
+    fn get_target(&self, name: &str) -> &Option<Decimal> {
+        &self
+            .allocations
+            .get(name)
+            .expect("Unable to retrieve allocation")
+            .pct_target
+    }
+
+    fn set_allocation(&mut self, name: String, amount: Decimal) {
+        // NOTE: I think we always know that the key is here so maybe we don't need to use the
+        // entry API. On the other hand, it probably doesn't hurt?
+        self.allocations
+            .entry(name)
+            .and_modify(|e| e.amount = amount);
+    }
+
+    fn set_target(&mut self, name: String, target: Decimal) {
+        self.allocations
+            .entry(name)
+            .and_modify(|e| e.pct_target = Some(target));
+    }
+
+    fn complete(&self) -> bool {
+        // Do we have an allocation set for all our asset classes?
+        self.allocations.values().all(|v| v.pct_target.is_some())
+    }
+
+    fn summary_table(&self) -> String {
+        let mut result = String::from("Asset Class\tAllocation\tTarget");
+        for (asset_class, allocation) in &self.allocations {
+            let row = format!(
+                "\n{}\t{}\t{:?}",
+                asset_class, allocation.amount, allocation.pct_target
+            );
+            result.push_str(row.as_str());
         }
 
-        println!("Enter amount invested in {}:", asset_class);
-        let mut amount = String::new();
-        io::stdin()
-            .read_line(&mut amount)
-            .expect("Failed to read line");
-        let amount: f64 = amount.trim().parse().expect("Please enter a number");
-        let amount_dec = Decimal::from_f64_retain(amount)
-            .expect("Failed to convert to Decimal")
-            .round_dp(2);
-
-        portfolio
-            .allocations
-            .insert(asset_class.to_string(), amount_dec);
-        portfolio.total += amount_dec;
+        result
     }
 }
 
-fn input_ideal_allocations(ideal_allocations: &mut HashMap<String, f64>) {
+fn main() -> InquireResult<()> {
+    let mut portfolio = Portfolio::new();
+
     loop {
-        println!("Enter asset class (or 'done' to finish):");
-        let mut asset_class = String::new();
-        io::stdin()
-            .read_line(&mut asset_class)
-            .expect("Failed to read line");
-        let asset_class = asset_class.trim();
+        let mut options: Vec<&str> = vec!["Add Asset Class", "Exit"];
 
-        if asset_class == "done" {
-            break;
-        }
+        if portfolio.num_allocations() > 0 {
+            // If we have at least one asset class, we can start setting allocations and targets
+            options.push("Set Allocation");
+            options.push("Set Target");
+            // We can also check on our current Portfolio
+            options.push("Check Portfolio");
 
-        println!("Enter ideal percentage for {}:", asset_class);
-        let mut percentage = String::new();
-        io::stdin()
-            .read_line(&mut percentage)
-            .expect("Failed to read line");
-        let percentage: f64 = percentage.trim().parse().expect("Please enter a number");
-
-        ideal_allocations.insert(asset_class.to_string(), percentage / 100.0);
-    }
-}
-
-fn calculate_adjustments(current: &Portfolio, ideal: &HashMap<String, f64>) {
-    println!("\nAdjustments needed:");
-
-    // Combine all asset classes from both current and ideal allocations
-    let mut all_assets: HashSet<String> = current.allocations.keys().cloned().collect();
-    all_assets.extend(ideal.keys().cloned());
-
-    for asset_class in all_assets {
-        let ideal_percentage = ideal.get(&asset_class).unwrap_or(&0.0);
-        // TODO: Should we convert this earlier when we parse?
-        let ideal_amount = current.total
-            * Decimal::from_f64_retain(*ideal_percentage).expect("Failed to convert to decimal");
-        let default_amount = &dec!(0.0);
-        let current_amount = current
-            .allocations
-            .get(&asset_class)
-            .unwrap_or(default_amount);
-        let adjustment = ideal_amount - current_amount;
-
-        if adjustment.abs() > dec!(0.01) {
-            // Avoid displaying very small adjustments
-            if adjustment > dec!(0.0) {
-                println!("Buy ${:.2} of {}", adjustment, asset_class);
-            } else {
-                println!("Sell ${:.2} of {}", -adjustment, asset_class);
+            if portfolio.complete() {
+                // If we have targets set for all the asset classes, we can compute a plan
+                options.push("Compute Exchange");
             }
         }
+
+        let ans: Result<&str, InquireError> = Select::new("Command:", options).prompt();
+
+        match ans {
+            Ok("Add Asset Class") => {
+                println!("Current Asset Classes:\n{:?}", portfolio.allocations.keys());
+                let new_asset_class = Text::new("New Asset Class:").prompt();
+
+                match new_asset_class {
+                    Ok(new_asset_class) => portfolio.add_asset_class(new_asset_class),
+                    Err(_) => println!("Error occurred adding asset class"),
+                }
+            }
+            Ok("Set Allocation") => {
+                let asset_class =
+                    Select::new("Choose Asset Class:", portfolio.asset_classes()).prompt();
+
+                match asset_class {
+                    Ok(asset_class) => {
+                        let prompt = format!(
+                            "New Allocation for {} (Current: {}):",
+                            asset_class,
+                            portfolio.get_allocation(&asset_class)
+                        );
+
+                        // TODO: Validation? I feel like first we parse as f64, then convert to
+                        // Decimal(2)?
+                        let new_allocation = Text::new(&prompt).prompt();
+
+                        match new_allocation {
+                            Ok(new_allocation) => portfolio.set_allocation(asset_class.to_string(), Decimal::from_str(new_allocation.as_str()).unwrap()),
+                            Err(_) => println!("An error happened when trying to set the allocation, please try again")
+                        }
+                    }
+                    Err(_) => println!("There was an error, please try again"),
+                }
+            }
+            Ok("Set Target") => {
+                let asset_class =
+                    Select::new("Choose Asset Class:", portfolio.asset_classes()).prompt();
+
+                match asset_class {
+                    Ok(asset_class) => {
+                        let current_target = match portfolio.get_target(&asset_class) {
+                            Some(target) => format!("{}", target),
+                            None => String::from("Unspecified"),
+                        };
+
+                        let prompt = format!(
+                            "New Target for {} (Current: {}):",
+                            asset_class, current_target
+                        );
+
+                        let new_target = Text::new(&prompt).prompt();
+
+                        match new_target {
+                            Ok(new_target) => portfolio.set_target(
+                                asset_class.to_string(),
+                                Decimal::from_str(new_target.as_str()).unwrap(),
+                            ),
+                            Err(_) => println!(
+                                "An error happened when trying to set the target, please try again"
+                            ),
+                        }
+                    }
+                    Err(_) => println!("There was an error, please try again"),
+                }
+            }
+            Ok("Check Portfolio") => {
+                println!("{}", portfolio.summary_table());
+            }
+            Ok("Compute Exchange") => {
+                for (asset_class, allocation) in &portfolio.allocations {
+                    let ideal_amount = portfolio.total()
+                        * (allocation.pct_target.expect("Unexpected unset target") / dec!(100));
+
+                    let adjustment = ideal_amount - allocation.amount;
+
+                    if adjustment > dec!(0.0) {
+                        println!("Buy ${:.2} of {}", adjustment, asset_class);
+                    } else {
+                        println!("Sell ${:.2} of {}", -adjustment, asset_class);
+                    }
+                }
+            }
+            Ok("Exit") => break,
+            Ok(_) => unimplemented!(),
+            Err(_) => println!("There was an error, please try again"),
+        }
     }
+
+    Ok(())
 }
