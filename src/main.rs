@@ -28,6 +28,10 @@ impl Portfolio {
         }
     }
 
+    fn num_allocations(&self) -> usize {
+        self.allocations.len()
+    }
+
     fn total(&self) -> Decimal {
         self.allocations.values().map(|v| v.amount).sum()
     }
@@ -77,6 +81,11 @@ impl Portfolio {
             .and_modify(|e| e.pct_target = Some(target));
     }
 
+    fn complete(&self) -> bool {
+        // Do we have an allocation set for all our asset classes?
+        self.allocations.values().all(|v| v.pct_target.is_some())
+    }
+
     fn summary_table(&self) -> String {
         let mut result = String::from("Asset Class\tAllocation\tTarget");
         for (asset_class, allocation) in &self.allocations {
@@ -97,17 +106,17 @@ fn main() -> InquireResult<()> {
     loop {
         let mut options: Vec<&str> = vec!["Add Asset Class", "Exit"];
 
-        if portfolio.allocations.len() > 0 {
+        if portfolio.num_allocations() > 0 {
             // If we have at least one asset class, we can start setting allocations and targets
             options.push("Set Allocation");
             options.push("Set Target");
             // We can also check on our current Portfolio
             options.push("Check Portfolio");
-        }
 
-        if portfolio.allocations.len() >= 2 {
-            // If there are less than two asset classes, we need to make the user add until there
-            // are two minimum for our application to do anything
+            if portfolio.complete() {
+                // If we have targets set for all the asset classes, we can compute a plan
+                options.push("Compute Exchange");
+            }
         }
 
         let ans: Result<&str, InquireError> = Select::new("Command:", options).prompt();
@@ -179,6 +188,20 @@ fn main() -> InquireResult<()> {
             }
             Ok("Check Portfolio") => {
                 println!("{}", portfolio.summary_table());
+            }
+            Ok("Compute Exchange") => {
+                for (asset_class, allocation) in &portfolio.allocations {
+                    let ideal_amount = portfolio.total()
+                        * (allocation.pct_target.expect("Unexpected unset target") / dec!(100));
+
+                    let adjustment = ideal_amount - allocation.amount;
+
+                    if adjustment > dec!(0.0) {
+                        println!("Buy ${:.2} of {}", adjustment, asset_class);
+                    } else {
+                        println!("Sell ${:.2} of {}", -adjustment, asset_class);
+                    }
+                }
             }
             Ok("Exit") => break,
             Ok(_) => unimplemented!(),
